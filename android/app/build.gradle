@@ -5,12 +5,8 @@ def keystoreProperties = new Properties()
 
 if (keystorePropertiesFile.exists()) {
     keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
-} else {
-    keystoreProperties['storeFile'] = System.getenv('ANDROID_KEYSTORE_FILE') ?: 'keystores/unicorn-pos-release.keystore'
-    keystoreProperties['storePassword'] = System.getenv('ANDROID_KEYSTORE_PASSWORD') ?: ''
-    keystoreProperties['keyAlias'] = System.getenv('ANDROID_KEY_ALIAS') ?: 'unicornpos'
-    keystoreProperties['keyPassword'] = System.getenv('ANDROID_KEY_PASSWORD') ?: ''
 }
+def hasKeystore = keystorePropertiesFile.exists() && keystoreProperties['storeFile']
 
 android {
     namespace = "com.unicornpos.app"
@@ -26,10 +22,9 @@ android {
     }
     
     signingConfigs {
-        release {
-            def keystorePath = keystoreProperties['storeFile']
-            if (keystorePath) {
-                storeFile file(keystorePath)
+        if (hasKeystore) {
+            release {
+                storeFile rootProject.file(keystoreProperties['storeFile'])
                 storePassword keystoreProperties['storePassword']
                 keyAlias keystoreProperties['keyAlias']
                 keyPassword keystoreProperties['keyPassword']
@@ -46,7 +41,9 @@ android {
             minifyEnabled true
             shrinkResources true
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
-            signingConfig signingConfigs.release
+            if (hasKeystore) {
+                signingConfig signingConfigs.release
+            }
         }
     }
     
