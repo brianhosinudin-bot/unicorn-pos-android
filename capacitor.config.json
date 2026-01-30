@@ -1,0 +1,16 @@
+{
+  "appId": "com.unicornpos.app",
+  "appName": "Unicorn POS",
+  "webDir": "out",
+  "bundledWebRuntime": false,
+  "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 2000,
+      "backgroundColor": "#0a0a0a"
+    }
+  },
+  "android": {
+    "allowMixedContent": true,
+    "backgroundColor": "#0a0a0a"
+  }
+}

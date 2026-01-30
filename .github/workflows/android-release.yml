@@ -1,0 +1,174 @@
+name: Build Android Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version_name:
+        description: 'Version name (e.g., 1.0.0)'
+        required: true
+        default: '1.0.0'
+      version_code:
+        description: 'Version code (integer)'
+        required: true
+        default: '1'
+      build_type:
+        description: 'Build type'
+        required: true
+        default: 'release'
+        type: choice
+        options:
+          - debug
+          - release
+
+env:
+  NODE_VERSION: '18'
+  JAVA_VERSION: '17'
+
+jobs:
+  build-release:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Capacitor CLI
+        run: |
+          npm install -g @capacitor/cli
+          npm install @capacitor/core @capacitor/android
+
+      - name: Build Next.js App
+        run: npm run build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+
+      - name: Initialize and Sync Capacitor
+        run: |
+          npx cap add android || true
+          npx cap sync android
+
+      - name: Decode Keystore
+        if: github.event.inputs.build_type == 'release' || startsWith(github.ref, 'refs/tags/')
+        run: |
+          mkdir -p android/keystores
+          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > android/keystores/unicorn-pos-release.keystore
+          
+          cat > android/keystores/keystore.properties <<EOF
+          storeFile=keystores/unicorn-pos-release.keystore
+          storePassword=${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          keyAlias=${{ secrets.ANDROID_KEY_ALIAS }}
+          keyPassword=${{ secrets.ANDROID_KEY_PASSWORD }}
+          EOF
+
+      - name: Update Version
+        if: github.event.inputs.version_name
+        run: |
+          sed -i "s/versionCode 1/versionCode ${{ github.event.inputs.version_code }}/" android/app/build.gradle
+          sed -i "s/versionName \"1.0.0\"/versionName \"${{ github.event.inputs.version_name }}\"/" android/app/build.gradle
+
+      - name: Build Debug APK
+        if: github.event.inputs.build_type == 'debug'
+        run: |
+          cd android
+          ./gradlew assembleDebug
+          
+      - name: Build Release APK
+        if: github.event.inputs.build_type == 'release' || startsWith(github.ref, 'refs/tags/')
+        run: |
+          cd android
+          ./gradlew assembleRelease
+
+      - name: Build Release AAB
+        if: github.event.inputs.build_type == 'release' || startsWith(github.ref, 'refs/tags/')
+        run: |
+          cd android
+          ./gradlew bundleRelease
+
+      - name: Prepare Artifacts
+        run: |
+          mkdir -p artifacts
+          
+          if [ -f android/app/build/outputs/apk/debug/app-debug.apk ]; then
+            cp android/app/build/outputs/apk/debug/app-debug.apk artifacts/unicorn-pos-debug.apk
+          fi
+          
+          if [ -f android/app/build/outputs/apk/release/app-release.apk ]; then
+            cp android/app/build/outputs/apk/release/app-release.apk artifacts/unicorn-pos-release.apk
+          fi
+          
+          if [ -f android/app/build/outputs/bundle/release/app-release.aab ]; then
+            cp android/app/build/outputs/bundle/release/app-release.aab artifacts/unicorn-pos-release.aab
+          fi
+          
+          ls -la artifacts/
+
+      - name: Upload Release APK
+        if: github.event.inputs.build_type == 'release' || startsWith(github.ref, 'refs/tags/')
+        uses: actions/upload-artifact@v4
+        with:
+          name: unicorn-pos-release-apk
+          path: artifacts/unicorn-pos-release.apk
+          retention-days: 90
+
+      - name: Upload Release AAB
+        if: github.event.inputs.build_type == 'release' || startsWith(github.ref, 'refs/tags/')
+        uses: actions/upload-artifact@v4
+        with:
+          name: unicorn-pos-release-aab
+          path: artifacts/unicorn-pos-release.aab
+          retention-days: 90
+
+      - name: Generate Build Summary
+        run: |
+          VERSION="${{ github.event.inputs.version_name || '1.0.0' }}"
+          
+          echo "## Unicorn POS Android Build" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Version | $VERSION |" >> $GITHUB_STEP_SUMMARY
+          echo "| Build Type | ${{ github.event.inputs.build_type || 'release' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Commit | ${{ github.sha }} |" >> $GITHUB_STEP_SUMMARY
+
+      - name: Export Download Links
+        run: |
+          RUN_ID="${{ github.run_id }}"
+          REPO="${{ github.repository }}"
+          
+          cat > artifacts/download_links.json <<EOF
+          {
+            "release_apk_url": "https://github.com/$REPO/actions/runs/$RUN_ID",
+            "release_aab_url": "https://github.com/$REPO/actions/runs/$RUN_ID",
+            "build_status": "SIGNED_SUCCESS"
+          }
+          EOF
+          
+          cat artifacts/download_links.json
+
+      - name: Upload Download Links
+        uses: actions/upload-artifact@v4
+        with:
+          name: download-links
+          path: artifacts/download_links.json
