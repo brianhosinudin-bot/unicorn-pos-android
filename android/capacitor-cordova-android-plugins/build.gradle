@@ -1,0 +1,7 @@
+apply from: "../capacitor-cordova-android-plugins/cordova.variables.gradle"
+buildscript {
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
